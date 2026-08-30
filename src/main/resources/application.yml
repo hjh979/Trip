@@ -1,0 +1,185 @@
+server:
+  # IDEA 直接运行 BackendApplication 时也固定使用项目端口，避免回退到 Spring Boot 默认的 8080。
+  port: ${SERVER_PORT:18081}
+
+spring:
+  config:
+    # IDEA uses the repository root while command-line launches often use
+    # backend/ as their working directory. Support both without copying secrets.
+    # Process environment variables still take precedence over these files.
+    import: optional:file:backend/.env[.properties],optional:file:.env[.properties]
+  autoconfigure:
+    exclude:
+      # Spring AI Alibaba 2.0.0-M1.1 的 dashscope autoconfigure imports 中引用了这个缺失类。
+      # 先显式排除，保留 ChatClient/DashScope starter 的学习接入路径。
+      - com.alibaba.cloud.ai.autoconfigure.dashscope.DashScopeMultimodalEmbeddingAutoConfiguration
+  application:
+    name: voyagemind
+  profiles:
+    active: dev
+  ai:
+    dashscope:
+      enabled: ${AI_DASHSCOPE_ENABLED:false}
+      api-key: ${AI_DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: ${AI_DASHSCOPE_CHAT_MODEL:qwen-plus}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:tripstar}
+    password: ${RABBITMQ_PASSWORD:tripstar-dev}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 5s
+
+logging:
+  file:
+    path: ./logs
+
+tripstar:
+  tasks:
+    # RabbitMQ is the single asynchronous transport; MySQL remains the task authority.
+    transport: ${TASK_TRANSPORT:rabbit}
+    max-attempts: ${TASK_MAX_ATTEMPTS:4}
+    lease-seconds: ${TASK_LEASE_SECONDS:180}
+    recovery-poll-ms: ${TASK_RECOVERY_POLL_MS:30000}
+    # Safe only while exactly one application instance owns all queues.
+    single-instance-recover-on-startup: ${TASK_SINGLE_INSTANCE_RECOVER_ON_STARTUP:true}
+    local:
+      dispatch-enabled: ${TASK_LOCAL_DISPATCH_ENABLED:true}
+      poll-ms: ${TASK_LOCAL_POLL_MS:500}
+      max-concurrency: ${TASK_LOCAL_MAX_CONCURRENCY:4}
+      # 保留交互任务容量，低优先级知识抓取默认最多同时运行一个。
+      background-concurrency: ${TASK_LOCAL_BACKGROUND_CONCURRENCY:1}
+    # 三类任务使用独立消费者容量，避免低优先级知识同步占满交互任务 Worker。
+    # 分钟级任务使用 prefetch=1，防止一个消费者预取并长期占住多个任务。
+    consumer:
+      modification:
+        concurrency: ${TASK_MODIFICATION_CONSUMER_CONCURRENCY:1}
+        max-concurrency: ${TASK_MODIFICATION_CONSUMER_MAX_CONCURRENCY:1}
+        prefetch: ${TASK_MODIFICATION_CONSUMER_PREFETCH:1}
+      plan:
+        concurrency: ${TASK_PLAN_CONSUMER_CONCURRENCY:2}
+        max-concurrency: ${TASK_PLAN_CONSUMER_MAX_CONCURRENCY:2}
+        prefetch: ${TASK_PLAN_CONSUMER_PREFETCH:1}
+      knowledge:
+        concurrency: ${TASK_KNOWLEDGE_CONSUMER_CONCURRENCY:1}
+        max-concurrency: ${TASK_KNOWLEDGE_CONSUMER_MAX_CONCURRENCY:1}
+        prefetch: ${TASK_KNOWLEDGE_CONSUMER_PREFETCH:1}
+    outbox:
+      poll-ms: ${OUTBOX_POLL_MS:500}
+      confirm-timeout-ms: ${OUTBOX_CONFIRM_TIMEOUT_MS:5000}
+  planning:
+    # 五个独立资料源共享同一个总时间预算；超时源降级，不阻塞 Planner。
+    research-timeout-seconds: ${PLANNING_RESEARCH_TIMEOUT_SECONDS:35}
+    context:
+      # RAG/API 原始数据留在数据库与 trace；模型只接收有界、去重后的 Context Pack。
+      max-characters: ${PLANNING_CONTEXT_MAX_CHARACTERS:10000}
+    tools:
+      # 防止 ReAct 循环重复查询并让 Tool 输出反向撑爆模型上下文。
+      max-calls: ${PLANNING_TOOL_MAX_CALLS:10}
+      max-output-characters: ${PLANNING_TOOL_MAX_OUTPUT_CHARACTERS:12000}
+  bulkhead:
+    acquire-timeout-ms: ${EXTERNAL_BULKHEAD_ACQUIRE_TIMEOUT_MS:30000}
+    ai:
+      max-concurrency: ${AI_MAX_CONCURRENCY:4}
+    embedding:
+      max-concurrency: ${EMBEDDING_MAX_CONCURRENCY:4}
+    amap:
+      max-concurrency: ${AMAP_MAX_CONCURRENCY:8}
+    milvus:
+      max-concurrency: ${MILVUS_MAX_CONCURRENCY:8}
+  ai:
+    provider: ${AI_PROVIDER:dashscope}
+    api-key: ${AI_API_KEY:${AI_DASHSCOPE_API_KEY:}}
+    base-url: ${AI_BASE_URL:}
+    model: ${AI_CHAT_MODEL:${AI_DASHSCOPE_CHAT_MODEL:qwen-plus}}
+    # 在线行程可单独选择低延迟模型；留空时仍使用管理员设置的全局模型。
+    planning-model: ${AI_PLANNING_MODEL:}
+    # 单次 HTTP 与整轮 ReAct 分别设上限，避免页面在一个坏请求上等待五分钟以上。
+    connect-timeout-seconds: ${AI_CONNECT_TIMEOUT_SECONDS:15}
+    read-timeout-seconds: ${AI_READ_TIMEOUT_SECONDS:150}
+    agent-timeout-seconds: ${AI_AGENT_TIMEOUT_SECONDS:180}
+    max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:6000}
+    # DeepSeek V4 默认启用 high/max 思考，在线行程已有 RAG、Tool 和确定性校验，默认关闭以降低首个 JSON 的等待时间。
+    deepseek-thinking-enabled: ${AI_DEEPSEEK_THINKING_ENABLED:false}
+    trace:
+      # 本地学习和排查 Agent 时建议开启；生产环境如担心日志包含用户输入，可设置 AI_TRACE_ENABLED=false。
+      enabled: ${AI_TRACE_ENABLED:true}
+      # 每次 Agent 调用会写入一个 Markdown 文件，包含系统提示词、用户提示词和模型原始输出。
+      dir: ${AI_TRACE_DIR:./logs/ai-trace}
+  rag:
+    corpus-revision: ${RAG_CORPUS_REVISION:v1}
+    cache:
+      max-entries: ${RAG_CACHE_MAX_ENTRIES:500}
+      ttl-seconds: ${RAG_CACHE_TTL_SECONDS:600}
+    milvus:
+      url: ${MILVUS_URL:http://localhost:19530}
+      token: ${MILVUS_TOKEN:root:Milvus}
+      collection: ${MILVUS_COLLECTION:voyagemind_knowledge_zh}
+      dimensions: ${EMBEDDING_DIMENSIONS:512}
+    embedding:
+      api-key: ${EMBEDDING_API_KEY:}
+      base-url: ${EMBEDDING_BASE_URL:}
+      model: ${EMBEDDING_MODEL:qllama/bge-small-zh-v1.5}
+      batch-size: ${EMBEDDING_BATCH_SIZE:16}
+      connect-timeout-ms: ${EMBEDDING_CONNECT_TIMEOUT_MS:5000}
+      read-timeout-ms: ${EMBEDDING_READ_TIMEOUT_MS:30000}
+  map:
+    amap:
+      enabled: ${AMAP_ENABLED:false}
+      key: ${AMAP_KEY:}
+      js-security-code: ${AMAP_JS_SECURITY_CODE:}
+      base-url: ${AMAP_BASE_URL:https://restapi.amap.com}
+      # 指定笔记结果页的图片补查配置。前端限流之外，后端再限制所有用户合计并发。
+      photo-max-concurrency: ${AMAP_PHOTO_MAX_CONCURRENCY:3}
+      photo-cache-hours: ${AMAP_PHOTO_CACHE_HOURS:6}
+      photo-acquire-timeout-ms: ${AMAP_PHOTO_ACQUIRE_TIMEOUT_MS:5000}
+voyagemind:
+  security:
+    session-hours: ${AUTH_SESSION_HOURS:12}
+    dev-bootstrap:
+      enabled: ${DEV_BOOTSTRAP_USERS:true}
+      admin-password: ${DEV_ADMIN_PASSWORD:VoyageAdmin@2026}
+      user-password: ${DEV_USER_PASSWORD:VoyageUser@2026}
+
+management:
+  health:
+    rabbit:
+      enabled: ${RABBIT_HEALTH_ENABLED:false}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+      group:
+        # RabbitMQ 不可用时 JVM 仍然存活，但不能接收新的异步规划流量。
+        liveness:
+          include: ping
+        readiness:
+          include: readinessState,db,rabbit
+
+# MyBatisPlus配置
+# https://baomidou.com/config/
+mybatis-plus:
+  # 对应的 XML 文件位置
+  mapper-locations: classpath*:/mapper/**/*Mapper.xml
+  # 实体扫描，多个package用逗号或者分号分隔
+  type-aliases-package: com.zkry.domain.entity
+  global-config:
+    db-config:
+      # 主键类型
+      # AUTO 自增 NONE 空 INPUT 用户输入 ASSIGN_ID 雪花 ASSIGN_UUID 唯一 UUID
+      # 如需改为自增 需要将数据库表全部设置为自增
+      id-type: ASSIGN_ID
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true

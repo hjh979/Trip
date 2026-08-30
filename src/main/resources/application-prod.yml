@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://localhost:3306/tripstar?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:}
+    password: ${DB_PASSWORD:}
+
+tripstar:
+  tasks:
+    # 生产环境默认使用 RabbitMQ；仍可用 TASK_TRANSPORT=local 显式回退。
+    transport: ${TASK_TRANSPORT:rabbit}
+    # 当前部署模型是严格单实例，应用重启时可立即恢复上一进程的执行中任务。
+    single-instance-recover-on-startup: ${TASK_SINGLE_INSTANCE_RECOVER_ON_STARTUP:true}
+  ai:
+    trace:
+      # Prompt traces contain user input and model output. Production must opt in explicitly.
+      enabled: ${AI_TRACE_ENABLED:false}

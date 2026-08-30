@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="VoyageMind Backend" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <module name="tripstar-java" />
+    <option name="PROGRAM_PARAMETERS" value="--server.port=18081" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.zkry.BackendApplication" />
+    <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
